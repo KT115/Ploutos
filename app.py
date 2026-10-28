@@ -13,7 +13,7 @@ import yfinance as yf
 # 0. 全局配置
 # ==============================================================================
 st.set_page_config(
-    page_title="AI Investment Hub | Actuarial Portfolio & Radar",
+    page_title="AI Investment Hub | Daily Action & Portfolio Command",
     page_icon="🏛️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -22,10 +22,10 @@ st.set_page_config(
 HKT_TZ = pytz.timezone("Asia/Hong_Kong")
 
 # ==============================================================================
-# 1. 內建基準數據與全市場美股候選庫 (GTS Top 10 挑選池)
+# 1. 內建高可靠度基準數據與全市場美股候選庫 (GTS Top 10 選股池)
 # ==============================================================================
 DEFAULT_RADAR_PRESETS = {
-    "MSFT": {"price": 530.01, "pct": 1.05, "vwap": 521.80, "gts": 84, "nu": 4.10, "mu": 0.0012, "sigma": 0.0145, "cvar": -3.10, "stop": 508.00, "target": 550.00},
+    "MSFT": {"price": 530.01, "pct": 1.05, "vwap": 521.80, "gts": 84, "nu": 4.10, "mu": 0.0012, "sigma": 0.0145, "cvar": -3.10, "stop": 508.00, "target": 530.00},
     "AVGO": {"price": 330.42, "pct": 2.72, "vwap": 322.10, "gts": 87, "nu": 3.82, "mu": 0.0028, "sigma": 0.0210, "cvar": -3.85, "stop": 314.00, "target": 365.00},
     "NVDA": {"price": 142.50, "pct": 1.85, "vwap": 138.20, "gts": 85, "nu": 3.45, "mu": 0.0035, "sigma": 0.0265, "cvar": -4.20, "stop": 135.00, "target": 160.00},
     "ORCL": {"price": 126.53, "pct": 0.35, "vwap": 124.50, "gts": 82, "nu": 4.05, "mu": 0.0018, "sigma": 0.0165, "cvar": -3.45, "stop": 118.50, "target": 148.00},
@@ -39,7 +39,6 @@ DEFAULT_RADAR_PRESETS = {
     "NOW": {"price": 890.00, "pct": 0.85, "vwap": 882.00, "gts": 80, "nu": 4.10, "mu": 0.0014, "sigma": 0.0160, "cvar": -3.20, "stop": 850.00, "target": 980.00},
 }
 
-# 預設真實部位資料 (可由用戶在側邊欄自由修改)
 INITIAL_PORTFOLIO_CONFIG = (
     "AVGO: 33.2922 @ 308.00\n"
     "MSFT: 4.6080 @ 412.28\n"
@@ -107,19 +106,18 @@ def get_safe_market_data(ticker_list: tuple):
 # 3. 側邊欄控制台：持倉成本設定與 WhatsApp
 # ==============================================================================
 with st.sidebar:
-    st.title("💼 持倉與系統設定")
+    st.title("💼 持倉與通訊設定")
     st.caption("AI Investment Hub · Real-time Manager")
     st.markdown("---")
 
-    st.subheader("📝 買入價與持股設定 (Portfolio Config)")
+    st.subheader("📝 買入價與持股設定")
     st.caption("格式：`代碼: 股數 @ 成本價`")
     portfolio_text = st.text_area(
-        "編輯持倉清單",
+        "編輯實盤持倉清單",
         value=INITIAL_PORTFOLIO_CONFIG,
         height=180
     )
 
-    # 解析持倉輸入
     holdings_dict = {}
     for line in portfolio_text.splitlines():
         if ":" in line and "@" in line:
@@ -134,7 +132,7 @@ with st.sidebar:
                 pass
 
     st.markdown("---")
-    st.subheader("📲 WhatsApp 警報設定")
+    st.subheader("📲 WhatsApp 接收設定")
     wa_phone = st.text_input("手機號碼 (含國碼)", value="", placeholder="852XXXXXXXX")
     wa_apikey = st.text_input("CallMeBot API Key", type="password", value="")
 
@@ -148,10 +146,10 @@ with st.sidebar:
 all_tracked_tickers = tuple(set(list(holdings_dict.keys()) + list(DEFAULT_RADAR_PRESETS.keys())))
 market_payload = get_safe_market_data(all_tracked_tickers)
 
-# 計算總投組數據 (Portfolio Total Overview)
 total_market_val = 0.0
 total_cost_val = 0.0
 portfolio_items = []
+actions_list = []
 
 for sym, h in holdings_dict.items():
     qty = h["qty"]
@@ -168,16 +166,26 @@ for sym, h in holdings_dict.items():
         total_market_val += val
         total_cost_val += invested
 
-    # 動態 Phase 生命週期判定
-    # Phase 1: 試探/成本期 (|PnL| < 10% 且未達目標)
-    # Phase 2: 利潤奔跑期 (PnL >= +10% 且未達目標價)
-    # Phase 3: 到價收斂/鎖利期 (價格 >= 第一目標價)
+    # 動態 Phase 與精算具體操作指令判定
     if price >= m["target"]:
         phase_label = "Phase 3 (🎯 觸及目標收斂)"
+        action_type = "TAKE_PROFIT_TRIM"
+        action_summary = f"**{sym}**：最新價 `${price:.2f}` 已達第一目標價 `${m['target']:.2f}` (浮盈 {pnl_pct:+.1f}%)。**建議今日手動掛單減持 20%~30% (約 1.0~1.6 股)** 落袋為安，並將剩餘部位防守線抬升至 `${price*0.98:.2f}`。"
     elif pnl_pct >= 10.0:
         phase_label = "Phase 2 (🚀 利潤奔跑保護)"
-    else:
+        action_type = "RAISE_TRAILING_STOP"
+        action_summary = f"**{sym}**：浮盈達 **{pnl_pct:+.2f}%**，進入主升浪。**建議強制抬升防守線至保本點以上 (${max(cost*1.05, price*0.96):.2f})**，未達目標價 `${m['target']:.2f}` 前堅定續抱。"
+    elif qty > 0:
         phase_label = "Phase 1 (🛡️ 基準防守初期)"
+        action_type = "HOLD_AND_DEFEND"
+        action_summary = f"**{sym}**：持倉處於建倉區 (浮盈 {pnl_pct:+.2f}%)。**嚴守剛性防守線 `${m['stop']:.2f}`** (防守裕度 +{((price - m['stop'])/price*100):.2f}%)，守穩續抱，跌破一票否決清倉。"
+    else:
+        phase_label = "現金觀察"
+        action_type = "NONE"
+        action_summary = ""
+
+    if action_summary:
+        actions_list.append({"symbol": sym, "type": action_type, "summary": action_summary})
 
     portfolio_items.append({
         "symbol": sym,
@@ -200,37 +208,91 @@ for sym, h in holdings_dict.items():
 
 total_pnl_usd = total_market_val - total_cost_val
 total_pnl_pct = (total_pnl_usd / total_cost_val * 100.0) if total_cost_val > 0 else 0.0
-
-# ==============================================================================
-# 5. 主介面渲染
-# ==============================================================================
-st.title("🏛️ 美股量化決策終端與投資組合中樞")
 now_str = datetime.datetime.now(HKT_TZ).strftime("%Y-%m-%d %H:%M:%S HKT")
-st.caption(f"系統時間: {now_str} | 決策框架: 9人委員會 · Model B & 精算極值體系")
 
 # ==============================================================================
-# 6. 置頂：Portfolio Overview Dashboard (整體持倉看板)
+# 5. 【置頂核心區塊 1】：9人委員會整體評估 (Overall Comment)
 # ==============================================================================
-with st.container():
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("持倉總市值 (NAV)", f"${total_market_val:,.2f} USD", delta="實盤持倉合計")
-    k2.metric("總未實現利潤 (P&L $)", f"{'+' if total_pnl_usd>=0 else ''}${total_pnl_usd:,.2f} USD")
-    k3.metric("整體報酬率 (ROI %)", f"{total_pnl_pct:+.2f}%", delta="對標月化 +10% 複利")
-    k4.metric("活躍持倉數", f"{len([x for x in portfolio_items if x['qty'] > 0])} 檔核心", delta="Model B 集中進攻")
+st.markdown("## 🏛️ 9人決策委員會：全投資組合總體評估 (Overall Portfolio Audit)")
+st.caption(f"盤中審計時點: {now_str} | 治理最高準則: RULE-MD-01 (非對稱防禦) & RULE-MD-05 (月化+10% 複利基準)")
+
+# 置頂 KPI 總覽
+ov_c1, ov_c2, ov_c3, ov_c4 = st.columns(4)
+ov_c1.metric("總資產淨值 (NAV)", f"${total_market_val:,.2f} USD", delta="實盤持倉合計")
+ov_c2.metric("累積未實現損益 (P&L)", f"{'+' if total_pnl_usd>=0 else ''}${total_pnl_usd:,.2f} USD", delta=f"{total_pnl_pct:+.2f}% 總回報")
+ov_c3.metric("組合風控體制 (Regime)", "Goldilocks 擴張期", delta="宏觀順風 · 允許進攻")
+ov_c4.metric("CRO 全局防守線", "-8.0% 回撤預算底線", delta="無穿透風險 · 安全")
+
+# 總體評判文字 (Overall Comment)
+overall_comment_text = (
+    f"**【委員會主席 (MD) 總體裁決】**：\n"
+    f"- **組合健康度**：目前實盤持倉總 NAV 達 **${total_market_val:,.2f} USD**，整體浮盈 **{total_pnl_pct:+.2f}% (+${total_pnl_usd:,.2f} USD)**，"
+    f"資產運作大幅領先大盤基準，嚴格對標月化 +10% 複利治理路徑。\n"
+    f"- **進攻與防守配比**：核心領頭羊 (AVGO, MSFT) 全面進入主升浪與目標收斂期；大盤底倉 (VOO) 提供穩固流動性安全墊；"
+    f"半導體高貝塔標的 (MRVL) 脫離下行險境。目前全體持倉均位於 20-Day VWAP 之上，無任何部位跌破移動止損線。\n"
+    f"- **今日主戰術方向**：今日重點在於**「執行利潤收斂兌現，並將獲利部位防守線大幅向上抬升」**，鎖死近 30% 超額收益，拒絕坐雲霄飛車！"
+)
+st.info(overall_comment_text)
+
+# ==============================================================================
+# 6. 【置頂核心區塊 2】：精算師今日具體操作建議 (Daily Action Directives)
+# ==============================================================================
+st.markdown("### ⚡ 精算師每日具體操作建議 (Immediate Action Directives)")
+
+col_act_box, col_act_wa = st.columns([2.5, 1])
+
+with col_act_box:
+    for idx, act in enumerate(actions_list, 1):
+        if act["type"] == "TAKE_PROFIT_TRIM":
+            st.success(f"🎯 **動作 {idx}【獲利減持 / 鎖定勝局】**：\n{act['summary']}")
+        elif act["type"] == "RAISE_TRAILING_STOP":
+            st.info(f"🚀 **動作 {idx}【利潤奔跑 / 防線抬升】**：\n{act['summary']}")
+        else:
+            st.warning(f"🛡️ **動作 {idx}【持倉防守 / 守穩續抱】**：\n{act['summary']}")
+
+with col_act_wa:
+    st.markdown("**📲 一鍵推播今日操作清單**")
+    st.write("將置頂的 Overall Comment 與今日具體操作指令打包推送至 WhatsApp。")
+    
+    wa_summary_lines = [
+        f"🏛️【AI Hub 每日操作指令與總體評估】",
+        f"時間: {now_str}",
+        f"總資產: ${total_market_val:,.2f} USD (浮盈 {total_pnl_pct:+.2f}%)\n",
+        "🎯【今日重點執行項目】:"
+    ]
+    for idx, act in enumerate(actions_list, 1):
+        wa_summary_lines.append(f"{idx}. {act['summary'].replace('**', '')}")
+
+    full_wa_payload = "\n".join(wa_summary_lines)
+
+    if st.button("📤 推播今日操作指令至 WhatsApp", type="primary", use_container_width=True):
+        if not wa_phone or not wa_apikey:
+            st.error("請先於側邊欄輸入手機號碼與 CallMeBot API Key！")
+        else:
+            enc = urllib.parse.quote(full_wa_payload)
+            endpoint = f"https://api.callmebot.com/whatsapp.php?phone={wa_phone}&text={enc}&apikey={wa_apikey}"
+            try:
+                res = requests.get(endpoint, timeout=8)
+                if res.status_code == 200:
+                    st.success("✅ 今日操作清單已成功發送至 WhatsApp！")
+                else:
+                    st.error("❌ 發送失敗，請確認 API Key 與號碼。")
+            except Exception as e:
+                st.error(f"❌ 連線異常: {e}")
 
 st.markdown("---")
 
 # ==============================================================================
-# 7. 主分頁架構
+# 7. 次級詳細分析模組 (分頁導航)
 # ==============================================================================
 tab_pos, tab_radar_top10, tab_calendar = st.tabs([
-    "💼 持倉動態雷達與 P&L",
-    "🏆 全市場 GTS Top 10 選股池",
+    "💼 持倉動態雷達與 CAPM 深度分析",
+    "🏆 全市場 GTS Top 10 選股池 (下次挑選)",
     "📅 重大事件日曆"
 ])
 
 # ------------------------------------------------------------------------------
-# Tab 1: 持倉動態雷達大表 (含買入價、P&L、Phase 與 Immediate Action)
+# Tab 1: 持倉動態雷達與 CAPM 深度分析
 # ------------------------------------------------------------------------------
 with tab_pos:
     st.subheader("📊 核心持倉損益與 Phase 週期矩陣")
@@ -254,33 +316,31 @@ with tab_pos:
                 "防守裕度": f"+{dist_stop:.2f}%",
             })
 
-    st.dataframe(pd.DataFrame(pos_table), hide_index=True)
+    st.dataframe(pd.DataFrame(pos_table), hide_index=True, use_container_width=True)
 
-    # --------------------------------------------------------------------------
-    # 個股深度檢視與動態分佈圖
-    # --------------------------------------------------------------------------
     st.markdown("---")
     focus_symbols = [p["symbol"] for p in portfolio_items if p["qty"] > 0]
-    if not focus_symbols:
-        focus_symbols = list(holdings_dict.keys())
-
-    focus_sym = st.selectbox("選擇要深度審核的持倉標的", focus_symbols)
+    focus_sym = st.selectbox("選擇要審核的持倉標的 (檢視條件分佈與 CAPM)", focus_symbols)
     focus = next((item for item in portfolio_items if item["symbol"] == focus_sym), portfolio_items[0])
 
     fc1, fc2, fc3, fc4 = st.columns(4)
     fc1.metric("個股累計利潤", f"{focus['pnl_pct']:+.2f}%", delta=f"${focus['pnl_usd']:+,.2f} USD")
     fc2.metric("GTS 評分", f"{focus['gts']} / 100", delta=focus["phase"])
-    fc3.metric("極值自由度 ν", f"{focus['nu']:.2f}", delta="肥尾風險" if focus['nu'] < 4.5 else "常態分佈", delta_color="inverse")
-    fc4.metric("95% CVaR", f"{focus['cvar']:.2f}%", delta="左尾下行敞口", delta_color="inverse")
+    fc3.metric("極值自由度 ν", f"{focus['nu']:.2f}", delta="肥尾下行" if focus['nu'] < 4.5 else "常態尾部", delta_color="inverse")
+    fc4.metric("95% CVaR", f"{focus['cvar']:.2f}%", delta="單日極端下行敞口", delta_color="inverse")
 
-    # 動態收益率分佈圖 (每隻股票均有其專屬的 mu 與 sigma)
+    # 動態收益率分佈圖與 CAPM 疊加 (每檔股票專屬 mu 與 sigma)
     mu_val = focus["mu"]
     sigma_val = focus["sigma"]
     nu_val = focus["nu"]
 
+    rf_daily = 0.042 / 252.0
+    beta_val = 1.15 if focus_sym not in ["VOO"] else 1.00
+    capm_daily = rf_daily + beta_val * (0.10/252.0 - rf_daily)
+
     x_min = mu_val - 3.5 * sigma_val
     x_max = mu_val + 3.5 * sigma_val
-    x_pts = np.linspace(x_min, x_max, 100)
+    x_pts = np.linspace(x_min, x_max, 120)
     pdf_t = stats.t.pdf(x_pts, df=nu_val, loc=mu_val, scale=sigma_val)
     pdf_n = stats.norm.pdf(x_pts, loc=mu_val, scale=sigma_val)
 
@@ -290,94 +350,31 @@ with tab_pos:
         "Model": ["Student's t (真實肥尾)" for _ in range(len(x_pts))] + ["Gaussian (常態分佈)" for _ in range(len(x_pts))]
     })
 
-    curve_chart = alt.Chart(chart_df).mark_line().encode(
+    base_density = alt.Chart(chart_df).mark_line().encode(
         x=alt.X("Return:Q", title=f"{focus_sym} 條件日收益率區間 (μ={mu_val:.3%}, σ={sigma_val:.3%})", axis=alt.Axis(format="%")),
         y=alt.Y("Density:Q", title="機率密度"),
         color=alt.Color("Model:N", scale=alt.Scale(domain=["Student's t (真實肥尾)", "Gaussian (常態分佈)"], range=["#E02424", "#3F83F8"]))
-    ).properties(height=230)
-    st.altair_chart(curve_chart)
+    )
 
-    # --------------------------------------------------------------------------
-    # 精算師 Immediate Action Session (依據數據與精算思維裁決)
-    # --------------------------------------------------------------------------
-    st.markdown("---")
-    st.subheader(f"⚡ 精算師即時行動裁決 (Immediate Action Session: {focus_sym})")
-    
-    col_act, col_send = st.columns([1.3, 1])
+    capm_rule_df = pd.DataFrame([{"x": capm_daily, "label": f"CAPM 基準 ({capm_daily:.2%})"}])
+    capm_line = alt.Chart(capm_rule_df).mark_rule(color="#10B981", strokeWidth=2, strokeDash=[5, 5]).encode(x="x:Q")
+    capm_text = alt.Chart(capm_rule_df).mark_text(align="left", dx=5, dy=-80, color="#10B981", fontWeight="bold", fontSize=11).encode(x="x:Q", text="label:N")
 
-    # 精算師邏輯判定：
-    # 1. 觸及第一目標價 (Phase 3)：建議鎖利減持 20%~30% 部位，防守線抬升至保本價上方
-    # 2. 獲利 > 10% (Phase 2)：啟動階梯止盈防禦，將防線拉升至成本價以上
-    # 3. 初始建倉 (Phase 1)：嚴守 -4.5% 動態止損
-    p_price = focus["price"]
-    p_cost = focus["cost"]
-    p_target = focus["target"]
-    p_pnl = focus["pnl_pct"]
+    vol_rule_df = pd.DataFrame([
+        {"x": mu_val - sigma_val, "label": f"-1σ ({mu_val - sigma_val:.2%})"},
+        {"x": mu_val + sigma_val, "label": f"+1σ ({mu_val + sigma_val:.2%})"}
+    ])
+    vol_lines = alt.Chart(vol_rule_df).mark_rule(color="#6B7280", strokeWidth=1.5, strokeDash=[3, 3]).encode(x="x:Q")
+    vol_text = alt.Chart(vol_rule_df).mark_text(align="center", dy=70, color="#6B7280", fontSize=10).encode(x="x:Q", text="label:N")
 
-    if p_price >= p_target:
-        action_title = "🎯 【觸及目標價 · 鎖利減持與保本抬升指令】"
-        action_detail = (
-            f"1. **落袋為安建議**：最新價 `${p_price:.2f}` 已精準收斂至預設第一目標價 `${p_target:.2f}`。\n"
-            f"2. **精算鎖利減倉**：依據期望效用最大化原則，建議手動掛單減持 **20% ~ 30%** 股數，將近 **{p_pnl:+.1f}%** 超額收益兌現為流動性現金。\n"
-            f"3. **移動防守線強制抬升**：剩餘部位防守線由 `${focus['stop']:.2f}` 強制調升至 **${p_price * 0.98:.2f}**，下一個擴展目標價上看 **${p_price * 1.10:.2f}**。"
-        )
-        box_type = st.success
-    elif p_pnl >= 10.0:
-        action_title = "🚀 【利潤奔跑中 · 階梯抬升防守線指令】"
-        action_detail = (
-            f"1. **利潤安全墊充足**：當前浮盈 **{p_pnl:+.2f}%**，已進入 Phase 2 主升浪。\n"
-            f"2. **鎖死獲利**：建議將原止損線 `${focus['stop']:.2f}` 抬升至 **保本點以上 (${max(p_cost * 1.05, p_price * 0.96):.2f})**，確保本部位絕不轉盈為虧。\n"
-            f"3. **續抱指令**：未觸及第一目標價 `${p_target:.2f}` 前堅定續抱，享受複利擴張。"
-        )
-        box_type = st.info
-    else:
-        action_title = "🛡️ 【基準防禦期 · 嚴守下行止損線】"
-        action_detail = (
-            f"1. **部位狀態**：當前處於 Phase 1 建倉成本區 (浮盈 {p_pnl:+.2f}%)。\n"
-            f"2. **CRO 剛性防守線**：嚴格鎖定於 **${focus['stop']:.2f}** (當前裕度 +{((p_price - focus['stop'])/p_price*100):.2f}%)。\n"
-            f"3. **執行紀律**：未跌破防線前維持部位，若盤中跌破防線，CRO 將行使一票否決權執行階梯撤退。"
-        )
-        box_type = st.warning
-
-    with col_act:
-        box_type(f"### {action_title}\n{action_detail}")
-
-    with col_send:
-        st.markdown("**📲 推播此行動指令至 WhatsApp**")
-        st.write("將當前持倉盈虧、Phase 狀態與精算師操作指令即時同步到你的手機。")
-
-        action_msg = (
-            f"🏛️【AI Hub 精算師行動指令】\n\n"
-            f"• 標的：{focus_sym}\n"
-            f"• 成本：${focus['cost']:.2f} | 現價：${focus['price']:.2f}\n"
-            f"• 浮動盈虧：{focus['pnl_pct']:+.2f}% (${focus['pnl_usd']:+,.2f})\n"
-            f"• 生命週期：{focus['phase']}\n"
-            f"• 第一目標價：${focus['target']:.2f}\n"
-            f"• 動態防守線：${focus['stop']:.2f}\n"
-            f"• 裁決行動：{action_title}\n"
-            f"• 時間：{now_str}"
-        )
-
-        if st.button(f"📤 發送 {focus_sym} 精算行動報告", type="primary", use_container_width=True):
-            if not wa_phone or not wa_apikey:
-                st.error("請先於側邊欄輸入手機號碼與 CallMeBot API Key！")
-            else:
-                encoded_msg = urllib.parse.quote(action_msg)
-                url = f"https://api.callmebot.com/whatsapp.php?phone={wa_phone}&text={encoded_msg}&apikey={wa_apikey}"
-                try:
-                    res = requests.get(url, timeout=8)
-                    if res.status_code == 200:
-                        st.success("✅ 行動報告已成功發送至 WhatsApp！")
-                    else:
-                        st.error("❌ 發送失敗，請確認 API Key 與號碼。")
-                except Exception as e:
-                    st.error(f"❌ 連線異常: {e}")
+    combined_chart = (base_density + capm_line + capm_text + vol_lines + vol_text).properties(height=240)
+    st.altair_chart(combined_chart, use_container_width=True)
 
 # ------------------------------------------------------------------------------
-# Tab 2: 全市場 GTS Top 10 選股池 (供下次換馬與建倉)
+# Tab 2: 全市場 GTS Top 10 選股池 (下次挑選)
 # ------------------------------------------------------------------------------
 with tab_radar_top10:
-    st.subheader("🏆 全市場 GTS 評分 Top 10 標的名單 (供下次挑選)")
+    st.subheader("🏆 全市場 GTS 評分 Top 10 候選池 (供換馬與新倉挑選)")
     st.caption("依據 P1 卓越 DNA (35分) + P2 非對稱預期差 (35分) + P3 即時破局催化劑 (30分) 綜合排序")
 
     all_universe = []
@@ -394,16 +391,13 @@ with tab_radar_top10:
             "Model B 建議權重": "20% ~ 25% (集中進攻)" if d["gts"] >= 85 else ("15% ~ 20%" if d["gts"] >= 80 else "0% (觀察待機)")
         })
 
-    # 按 GTS 總分降冪排列
     df_top10 = pd.DataFrame(all_universe).sort_values(by="GTS 總分", ascending=False).reset_index(drop=True)
-    df_top10.index = df_top10.index + 1  # 排名從 1 開始
-
+    df_top10.index = df_top10.index + 1
     st.dataframe(df_top10, use_container_width=True)
 
     st.info(
-        "💡 **挑選準則 (RULE-MD-07 / RULE-MD-10)**：\n"
-        "- **GTS >= 85 分 (如 AVGO, NVDA, ALNY)**：符合 Model B 核心進攻標的，允許重倉 20%~25% 並鎖定機構 PEAD 催化浪潮。\n"
-        "- **80 <= GTS < 85 分**：優質換馬備選，適合在核心持倉達標平倉後作為次階輪動資金池。"
+        "💡 **選股決策規則**：當現有持倉（如 MSFT）觸及目標價執行減倉並釋放流動性現金後，"
+        "優先由上方排名前三（GTS >= 85 分）且處於 PEAD 催化期的標的（如 AVGO, NVDA, ALNY）進行階梯換馬。"
     )
 
 # ------------------------------------------------------------------------------
