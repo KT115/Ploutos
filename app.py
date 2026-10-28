@@ -1,4 +1,5 @@
 import datetime
+import calendar
 import urllib.parse
 import altair as alt
 import numpy as np
@@ -10,7 +11,7 @@ import streamlit as st
 import yfinance as yf
 
 # ==============================================================================
-# 0. 全局配置 & 注入自適應現代化 CSS (徹底修復截斷與難看排版)
+# 0. 全局配置 & 自適應現代化主題 CSS
 # ==============================================================================
 st.set_page_config(
     page_title="AI Investment Hub | 實盤決策指揮終端",
@@ -23,33 +24,31 @@ HKT_TZ = pytz.timezone("Asia/Hong_Kong")
 
 st.markdown("""
 <style>
-    /* 全局緊湊與高對比字體 */
-    .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
+    .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
     
-    /* 置頂核心資產卡片 (無截斷) */
+    /* 頂部資產卡片 */
     .kpi-card-box {
         background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
         border: 1px solid #334155;
         border-radius: 10px;
-        padding: 14px 18px;
+        padding: 12px 16px;
         color: #F8FAFC;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
     }
-    .kpi-label { font-size: 12px; color: #94A3B8; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
-    .kpi-value { font-size: 24px; font-weight: 800; color: #FFFFFF; line-height: 1.2; }
-    .kpi-sub { font-size: 11px; margin-top: 4px; font-weight: 500; }
+    .kpi-label { font-size: 11px; color: #94A3B8; font-weight: 600; text-transform: uppercase; margin-bottom: 3px; }
+    .kpi-value { font-size: 22px; font-weight: 800; color: #FFFFFF; line-height: 1.2; }
+    .kpi-sub { font-size: 11px; margin-top: 3px; font-weight: 500; }
     .kpi-green { color: #10B981; }
     .kpi-blue { color: #38BDF8; }
 
-    /* 總體評估方塊 */
+    /* 總結方塊 */
     .audit-summary-box {
         background-color: #F8FAFC;
         border-left: 5px solid #2563EB;
         border-radius: 0 8px 8px 0;
-        padding: 14px 18px;
-        margin: 12px 0 18px 0;
+        padding: 12px 16px;
+        margin: 10px 0 16px 0;
         color: #1E293B;
-        font-size: 14px;
+        font-size: 13.5px;
         line-height: 1.6;
     }
 
@@ -59,12 +58,53 @@ st.markdown("""
         border: 1px solid #E2E8F0;
         border-radius: 8px;
         padding: 12px 16px;
-        margin-bottom: 10px;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        margin-bottom: 8px;
     }
     .action-trim { border-left: 5px solid #10B981; }
     .action-raise { border-left: 5px solid #3B82F6; }
     .action-hold { border-left: 5px solid #F59E0B; }
+
+    /* 真月曆 CSS Grid 樣式 */
+    .cal-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 6px;
+        margin-top: 10px;
+    }
+    .cal-header {
+        background: #F1F5F9;
+        font-weight: 700;
+        text-align: center;
+        padding: 8px 0;
+        font-size: 12px;
+        color: #475569;
+        border-radius: 4px;
+    }
+    .cal-cell {
+        background: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        min-height: 85px;
+        padding: 6px;
+        border-radius: 6px;
+        position: relative;
+    }
+    .cal-date-num {
+        font-size: 12px;
+        font-weight: 700;
+        color: #64748B;
+        margin-bottom: 4px;
+    }
+    .cal-badge {
+        font-size: 10.5px;
+        font-weight: 600;
+        padding: 2px 4px;
+        border-radius: 3px;
+        margin-bottom: 3px;
+        line-height: 1.2;
+        display: block;
+    }
+    .cal-badge-earnings { background: #FEE2E2; color: #DC2626; border: 1px solid #FECACA; }
+    .cal-badge-keynote { background: #DCFCE7; color: #15803D; border: 1px solid #BBF7D0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -95,13 +135,13 @@ INITIAL_PORTFOLIO_CONFIG = (
 )
 
 STATIC_EVENTS_DB = [
-    {"symbol": "NVDA", "title": "📊 NVDA 季度官方財報發布", "start": "2026-11-19", "category": "EARNINGS", "desc": "NVIDIA 季度財報與電話會議，檢驗 Blackwell 晶片量產與雲端巨頭 Capex。"},
-    {"symbol": "AVGO", "title": "📊 AVGO 季度官方財報發布", "start": "2026-12-10", "category": "EARNINGS", "desc": "博通季度財報，公布客製化 ASIC 與交換晶片在手合約。"},
-    {"symbol": "ORCL", "title": "📊 ORCL 季度官方財報發布", "start": "2026-12-08", "category": "EARNINGS", "desc": "甲骨文 OCI 雲端算力與企業資料庫履約合約 (RPO) 進展披露。"},
-    {"symbol": "MSFT", "title": "📊 MSFT 季度官方財報發布", "start": "2027-01-28", "category": "EARNINGS", "desc": "微軟 Azure 雲端增速與 Copilot 商業化付費轉化數據。"},
-    {"symbol": "GOOGL", "title": "📊 GOOGL 季度官方財報發布", "start": "2027-01-29", "category": "EARNINGS", "desc": "Alphabet 搜尋廣告、Google Cloud 營運利潤率與 TPU 部署。"},
-    {"symbol": "MRVL", "title": "📊 MRVL 季度官方財報發布", "start": "2026-12-03", "category": "EARNINGS", "desc": "邁威爾科技客製晶片與高速光互聯模組出貨進度。"},
-    {"symbol": "NVDA", "title": "🔥 NVIDIA GTC 大會 (次世代晶片發布)", "start": "2027-03-16", "category": "KEYNOTE", "desc": "黃仁勳發布次世代架構與全液冷 NVLink 集群。"}
+    {"symbol": "NVDA", "title": "NVDA 財報", "start": "2026-11-19", "category": "EARNINGS", "desc": "NVIDIA 季度財報與電話會議，檢驗 Blackwell 晶片量產出貨。"},
+    {"symbol": "AVGO", "title": "AVGO 財報", "start": "2026-12-10", "category": "EARNINGS", "desc": "博通季度財報，公布客製化 ASIC 與交換晶片在手合約。"},
+    {"symbol": "ORCL", "title": "ORCL 財報", "start": "2026-12-08", "category": "EARNINGS", "desc": "甲骨文 OCI 雲端算力與企業資料庫履約合約 (RPO) 進展披露。"},
+    {"symbol": "MSFT", "title": "MSFT 財報", "start": "2027-01-28", "category": "EARNINGS", "desc": "微軟 Azure 雲端增速與 Copilot 商業化付費轉化數據。"},
+    {"symbol": "GOOGL", "title": "GOOGL 財報", "start": "2027-01-29", "category": "EARNINGS", "desc": "Alphabet 搜尋廣告、Google Cloud 營運利潤率與 TPU 部署。"},
+    {"symbol": "MRVL", "title": "MRVL 財報", "start": "2026-12-03", "category": "EARNINGS", "desc": "邁威爾科技客製晶片與高速光互聯模組出貨進度。"},
+    {"symbol": "NVDA", "title": "NVIDIA GTC 大會", "start": "2027-03-16", "category": "KEYNOTE", "desc": "黃仁勳發布次世代晶片架構與全液冷 NVLink 集群。"}
 ]
 
 # ==============================================================================
@@ -148,19 +188,23 @@ def get_safe_market_data(ticker_list: tuple):
     return data_map
 
 # ==============================================================================
-# 3. 側邊欄控制台
+# 3. 側邊欄控制台 (增加 Cash 設定)
 # ==============================================================================
 with st.sidebar:
-    st.title("💼 持倉與通訊設定")
+    st.title("💼 持倉與現金設定")
     st.caption("AI Investment Hub · Terminal Config")
     st.markdown("---")
 
+    st.subheader("💵 現金儲備 (USD Cash)")
+    usd_cash = st.number_input("美元現金結算 (Cash)", min_value=0.0, value=1974.45, step=100.0, format="%.2f")
+
+    st.markdown("---")
     st.subheader("📝 買入價與持股設定")
     st.caption("格式：`代碼: 股數 @ 成本價`")
     portfolio_text = st.text_area(
         "編輯實盤持倉清單",
         value=INITIAL_PORTFOLIO_CONFIG,
-        height=180
+        height=160
     )
 
     holdings_dict = {}
@@ -191,7 +235,7 @@ with st.sidebar:
 all_tracked_tickers = tuple(set(list(holdings_dict.keys()) + list(DEFAULT_RADAR_PRESETS.keys())))
 market_payload = get_safe_market_data(all_tracked_tickers)
 
-total_market_val = 0.0
+total_stock_val = 0.0
 total_cost_val = 0.0
 portfolio_items = []
 actions_list = []
@@ -208,25 +252,25 @@ for sym, h in holdings_dict.items():
     pnl_pct = (pnl_usd / invested * 100.0) if invested > 0 else 0.0
 
     if qty > 0:
-        total_market_val += val
+        total_stock_val += val
         total_cost_val += invested
 
-    # 動態 Phase 與精算具體操作指令判定
+    # 動態 Phase 判定
     if price >= m["target"]:
         phase_label = "Phase 3 (🎯 觸及目標收斂)"
         action_type = "TAKE_PROFIT_TRIM"
         action_title = f"🎯 減持鎖利：{sym} 觸及第一目標價 ${m['target']:.2f}"
-        action_desc = f"最新現價 **${price:.2f}** 累計利潤達 **+{pnl_pct:.1f}% (+${pnl_usd:.2f} USD)**。建議手動掛單減持 **20%~30% (約 1.0~1.6 股)** 鎖死利潤，並將剩餘持倉防守線調升至 **${price*0.98:.2f}**。"
+        action_desc = f"最新現價 **${price:.2f}** 累計獲利達 **+{pnl_pct:.1f}% (+${pnl_usd:.2f} USD)**。建議手動掛單減持 **20%~30% (約 1.0~1.6 股)** 兌現利潤，並將剩餘部位防守線抬升至 **${price*0.98:.2f}**。"
     elif pnl_pct >= 10.0:
         phase_label = "Phase 2 (🚀 利潤奔跑保護)"
         action_type = "RAISE_TRAILING_STOP"
         action_title = f"🚀 抬升防線：{sym} 浮盈達 +{pnl_pct:.2f}%"
-        action_desc = f"累計利潤 **+${pnl_usd:.2f} USD**，進入主升浪。強制將防守線由原先的 ${m['stop']:.2f} 抬升至 **保本點以上 (${max(cost*1.05, price*0.96):.2f})**，未達目標價前堅定續抱。"
+        action_desc = f"累計獲利 **+${pnl_usd:.2f} USD**，進入主升浪。強制將防守線抬升至 **保本點以上 (${max(cost*1.05, price*0.96):.2f})**，未達目標價前堅定續抱。"
     elif qty > 0:
         phase_label = "Phase 1 (🛡️ 基準防守初期)"
         action_type = "HOLD_AND_DEFEND"
         action_title = f"🛡️ 嚴守防線：{sym} 浮盈 +{pnl_pct:.2f}%"
-        action_desc = f"處於初期建倉區。嚴格守穩剛性防守線 **${m['stop']:.2f}** (當前裕度 +{((price - m['stop'])/price*100):.2f}%)，守穩續抱，盤中跌破執行一票否決清倉。"
+        action_desc = f"處於初期建倉區。嚴格守穩剛性防守線 **${m['stop']:.2f}** (防守裕度 +{((price - m['stop'])/price*100):.2f}%)，跌破清倉。"
     else:
         phase_label = "現金觀察"
         action_type = "NONE"
@@ -260,54 +304,57 @@ for sym, h in holdings_dict.items():
         "cvar": m.get("cvar", -3.5)
     })
 
-total_pnl_usd = total_market_val - total_cost_val
+# 總 NAV 計入現金
+total_nav = total_stock_val + usd_cash
+total_pnl_usd = total_stock_val - total_cost_val
 total_pnl_pct = (total_pnl_usd / total_cost_val * 100.0) if total_cost_val > 0 else 0.0
+stock_weight_pct = (total_stock_val / total_nav * 100.0) if total_nav > 0 else 0.0
+cash_weight_pct = (usd_cash / total_nav * 100.0) if total_nav > 0 else 0.0
 now_str = datetime.datetime.now(HKT_TZ).strftime("%Y-%m-%d %H:%M:%S HKT")
 
 # ==============================================================================
-# 5. 【置頂區塊 1】：全投資組合總體評估 (無截斷卡片)
+# 5. 【置頂區塊 1】：全投資組合總體評估 (包含現金卡片)
 # ==============================================================================
 st.title("🏛️ 9人決策委員會：實盤操作指揮終端")
 st.caption(f"審計時點: {now_str} | 治理鐵律: RULE-MD-01 (非對稱防禦) & RULE-MD-05 (月化+10% 複利基準)")
 
-# 使用高可讀性 HTML 卡片，保證在任何螢幕寬度都不截斷數字
 st.markdown(f"""
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px;">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 12px;">
     <div class="kpi-card-box">
-        <div class="kpi-label">總資產淨值 (NAV)</div>
-        <div class="kpi-value">${total_market_val:,.2f}</div>
-        <div class="kpi-sub kpi-blue">實盤持倉合計 (USD)</div>
+        <div class="kpi-label">總資產淨值 (Total NAV)</div>
+        <div class="kpi-value">${total_nav:,.2f}</div>
+        <div class="kpi-sub kpi-blue">持倉股票 + 美元現金</div>
+    </div>
+    <div class="kpi-card-box">
+        <div class="kpi-label">持倉股票市值</div>
+        <div class="kpi-value">${total_stock_val:,.2f}</div>
+        <div class="kpi-sub kpi-blue">股票倉位: {stock_weight_pct:.1f}%</div>
+    </div>
+    <div class="kpi-card-box">
+        <div class="kpi-label">美元現金儲備 (Cash)</div>
+        <div class="kpi-value">${usd_cash:,.2f}</div>
+        <div class="kpi-sub kpi-green">流動性佔比: {cash_weight_pct:.1f}%</div>
     </div>
     <div class="kpi-card-box">
         <div class="kpi-label">累積未實現利潤 (P&L)</div>
         <div class="kpi-value kpi-green">{'+' if total_pnl_usd>=0 else ''}${total_pnl_usd:,.2f}</div>
-        <div class="kpi-sub kpi-green">整體回報率: {total_pnl_pct:+.2f}%</div>
-    </div>
-    <div class="kpi-card-box">
-        <div class="kpi-label">組合風控體制</div>
-        <div class="kpi-value">Goldilocks 擴張</div>
-        <div class="kpi-sub kpi-green">宏觀順風 · 允許 Model B 進攻</div>
-    </div>
-    <div class="kpi-card-box">
-        <div class="kpi-label">CRO 全局防守底線</div>
-        <div class="kpi-value">-8.0% 回撤預算</div>
-        <div class="kpi-sub kpi-blue">無任何部位穿透 · 安全受控</div>
+        <div class="kpi-sub kpi-green">報酬率: {total_pnl_pct:+.2f}%</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
-# 總結評判文字 (修復原先的字串黏著問題)
+# 總結評判文字
 st.markdown(f"""
 <div class="audit-summary-box">
     <b>【委員會主席 (MD) 總體裁決】</b><br>
-    • <b>組合健康度</b>：目前實盤持倉總 NAV 達 <b>${total_market_val:,.2f} USD</b>，累積浮盈 <b>{total_pnl_pct:+.2f}% (+${total_pnl_usd:,.2f} USD)</b>，大幅領先大盤基準，嚴格對標月化 +10% 複利治理目標。<br>
-    • <b>結構與體質</b>：核心領頭羊 (AVGO, MSFT) 全面進入主升浪與目標收斂期；大盤底倉 (VOO) 提供厚實安全墊；MRVL 脫離危險期。所有持倉均站穩 20-Day VWAP 之上。<br>
+    • <b>資金結構</b>：實盤總 NAV 為 <b>${total_nav:,.2f} USD</b>，其中股票資產 <b>${total_stock_val:,.2f} ({stock_weight_pct:.1f}%)</b>，現金儲備 <b>${usd_cash:,.2f} ({cash_weight_pct:.1f}%)</b>。累積浮盈 <b>{total_pnl_pct:+.2f}% (+${total_pnl_usd:,.2f} USD)</b>。<br>
+    • <b>結構與體質</b>：核心領頭羊 (AVGO, MSFT) 全面進入主升浪與目標收斂期；大盤底倉 (VOO) 提供厚實安全墊；MRVL 脫離危險期。所有部位站穩 20-Day VWAP 之上。<br>
     • <b>今日戰術核心</b>：今日核心戰術在於<b>「執行利潤收斂兌現，並將獲利部位防守線大幅向上抬升」</b>，鎖死超額收益，拒絕利潤坐雲霄飛車！
 </div>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 6. 【置頂區塊 2】：精算師每日具體操作指令 (清晰卡片版)
+# 6. 【置頂區塊 2】：精算師每日具體操作指令
 # ==============================================================================
 st.markdown("### ⚡ 精算師每日具體操作建議 (Immediate Action Directives)")
 
@@ -317,17 +364,16 @@ for act in actions_list:
     
     st.markdown(f"""
     <div class="action-row {border_class}">
-        <div style="font-size: 15px; font-weight: 700; color: {badge_color}; margin-bottom: 4px;">{act['title']}</div>
-        <div style="font-size: 13.5px; color: #334155; line-height: 1.5;">{act['desc']}</div>
+        <div style="font-size: 14.5px; font-weight: 700; color: {badge_color}; margin-bottom: 3px;">{act['title']}</div>
+        <div style="font-size: 13px; color: #334155; line-height: 1.5;">{act['desc']}</div>
     </div>
     """, unsafe_allow_html=True)
 
-# WhatsApp 推播獨立區塊 (杜絕按鈕截斷)
 with st.expander("📲 一鍵將上述操作指令推播至 WhatsApp (點擊展開/發送)"):
     wa_summary_lines = [
         f"🏛️【AI Hub 每日操作指令與總體評估】",
         f"時間: {now_str}",
-        f"總資產: ${total_market_val:,.2f} USD (浮盈 {total_pnl_pct:+.2f}%)\n",
+        f"總 NAV: ${total_nav:,.2f} USD (股票 ${total_stock_val:,.2f} | 現金 ${usd_cash:,.2f})\n",
         "🎯【今日重點執行項目】:"
     ]
     for idx, act in enumerate(actions_list, 1):
@@ -345,7 +391,7 @@ with st.expander("📲 一鍵將上述操作指令推播至 WhatsApp (點擊展�
                 if res.status_code == 200:
                     st.success("✅ 操作指令已成功發送至你的 WhatsApp！")
                 else:
-                    st.error("❌ 發送失敗，請確認 API Key 與手機號碼格式。")
+                    st.error("❌ 發送失敗，請確認 API Key 與號碼格式。")
             except Exception as e:
                 st.error(f"❌ 連線異常: {e}")
 
@@ -355,13 +401,13 @@ st.markdown("---")
 # 7. 主分頁架構
 # ==============================================================================
 tab_pos, tab_radar_top10, tab_calendar = st.tabs([
-    "💼 持倉動態雷達與 CAPM 直觀金額圖表",
-    "🏆 全市場 GTS Top 10 選股池 (下次挑選)",
-    "📅 重大事件日曆"
+    "💼 持倉雷達與【真實股價 $】直觀分佈圖",
+    "🏆 全市場 GTS Top 10 選股池 (帶 Phase 週期)",
+    "📅 重大事件真月曆視圖 (Calendar View)"
 ])
 
 # ------------------------------------------------------------------------------
-# Tab 1: 持倉動態雷達與直觀金額圖表
+# Tab 1: 持倉動態雷達與【真實股價 $】直觀圖表
 # ------------------------------------------------------------------------------
 with tab_pos:
     st.subheader("📊 核心持倉損益與 Phase 週期矩陣")
@@ -388,20 +434,19 @@ with tab_pos:
     st.dataframe(pd.DataFrame(pos_table), hide_index=True, use_container_width=True)
 
     # --------------------------------------------------------------------------
-    # 個股深度檢視：金額化直觀分佈圖 (徹底解答「+2.38% 是多少錢？」)
+    # 個股深度檢視：【真實股價 $】直觀分佈圖 (徹底回答 1σ 即是多少股價)
     # --------------------------------------------------------------------------
     st.markdown("---")
     focus_symbols = [p["symbol"] for p in portfolio_items if p["qty"] > 0]
-    focus_sym = st.selectbox("選擇要審核的持倉標的 (檢視條件分佈與直觀金額換算)", focus_symbols)
+    focus_sym = st.selectbox("選擇要審核的持倉標的 (X 軸直接顯示真實股價 $)", focus_symbols)
     focus = next((item for item in portfolio_items if item["symbol"] == focus_sym), portfolio_items[0])
 
     fc1, fc2, fc3, fc4 = st.columns(4)
-    fc1.metric("個股累計利潤", f"{focus['pnl_pct']:+.2f}%", delta=f"${focus['pnl_usd']:+,.2f} USD")
+    fc1.metric("個股累計獲利", f"{focus['pnl_pct']:+.2f}%", delta=f"${focus['pnl_usd']:+,.2f} USD")
     fc2.metric("GTS 評分", f"{focus['gts']} / 100", delta=focus["phase"])
-    fc3.metric("極值自由度 ν", f"{focus['nu']:.2f}", delta="肥尾下行" if focus['nu'] < 4.5 else "常態尾部", delta_color="inverse")
-    fc4.metric("95% CVaR", f"{focus['cvar']:.2f}%", delta="單日下行敞口", delta_color="inverse")
+    fc3.metric("極值自由度 ν", f"{focus['nu']:.2f}", delta="肥尾風險" if focus['nu'] < 4.5 else "常態尾部", delta_color="inverse")
+    fc4.metric("95% CVaR", f"{focus['cvar']:.2f}%", delta="左尾下行敞口", delta_color="inverse")
 
-    # 核心參數
     cur_p = focus["price"]
     pos_qty = focus["qty"]
     pos_val = focus["val"]
@@ -409,67 +454,92 @@ with tab_pos:
     sigma_val = focus["sigma"]
     nu_val = focus["nu"]
 
-    # 換算每 1σ 的具體每股金額與部位損益金額
-    sigma_1_dollar = cur_p * sigma_val
-    sigma_1_pos_pnl = pos_val * sigma_val
+    # 股價金額換算
+    sigma_dollar = cur_p * sigma_val
+    pos_sigma_dollar = pos_val * sigma_val
+    p_plus_1sigma = cur_p + sigma_dollar
+    p_minus_1sigma = cur_p - sigma_dollar
 
-    st.markdown(f"""
-    <div style="background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 13.5px; color: #1E3A8A;">
-        💡 <b>波動度直接換算金額 (以 {focus_sym} 持有 {pos_qty:.4f} 股 / 市值 ${pos_val:,.2f} USD 換算)：</b><br>
-        • <b>正常 1σ 日波動 (±{sigma_val*100:.2f}%)</b>：等於每股股價波動 <b>±${sigma_1_dollar:.2f} USD</b>，部位單日損益波動約 <b>±${sigma_1_pos_pnl:,.2f} USD</b>。<br>
-        • <b>極端 95% CVaR 尾部風險 ({focus['cvar']:.2f}%)</b>：若遭遇單日黑天鵝，預估每股下跌 <b>-${cur_p * abs(focus['cvar']/100):.2f} USD</b>，部位單日潛在最大虧損約 <b>-${pos_val * abs(focus['cvar']/100):,.2f} USD</b>。
-    </div>
-    """, unsafe_allow_html=True)
-
-    # 繪製 Altair 直觀金額雙標註分佈圖
     rf_daily = 0.042 / 252.0
     beta_val = 1.15 if focus_sym not in ["VOO"] else 1.00
     capm_daily = rf_daily + beta_val * (0.10/252.0 - rf_daily)
+    p_capm = cur_p * (1.0 + capm_daily)
 
-    x_min = mu_val - 3.5 * sigma_val
-    x_max = mu_val + 3.5 * sigma_val
-    x_pts = np.linspace(x_min, x_max, 120)
-    pdf_t = stats.t.pdf(x_pts, df=nu_val, loc=mu_val, scale=sigma_val)
-    pdf_n = stats.norm.pdf(x_pts, loc=mu_val, scale=sigma_val)
+    st.markdown(f"""
+    <div style="background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; padding: 10px 14px; margin: 8px 0 12px 0; font-size: 13.5px; color: #1E3A8A;">
+        💡 <b>【真實股價與金額波動對照】(持有 {pos_qty:.4f} 股 / 當前市值 ${pos_val:,.2f} USD)：</b><br>
+        • <b>當前市價基準</b>：<b>${cur_p:.2f} USD</b><br>
+        • <b>+1σ 正常波動上限</b>：股價達到 <b>${p_plus_1sigma:.2f}</b> (每股 +${sigma_dollar:.2f} / 部位浮盈 +${pos_sigma_dollar:.2f} USD)<br>
+        • <b>-1σ 正常波動下限</b>：股價回落至 <b>${p_minus_1sigma:.2f}</b> (每股 -${sigma_dollar:.2f} / 部位回撤 -${pos_sigma_dollar:.2f} USD)<br>
+        • <b>CAPM 基準價格</b>：<b>${p_capm:.2f}</b> (當日市場要求之理論補償價)
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 繪製真實股價 X 軸圖表
+    # 將回報率 r 映射為股價 P = cur_p * (1 + r)
+    r_pts = np.linspace(mu_val - 3.5 * sigma_val, mu_val + 3.5 * sigma_val, 120)
+    price_pts = cur_p * (1.0 + r_pts)
+
+    pdf_t = stats.t.pdf(r_pts, df=nu_val, loc=mu_val, scale=sigma_val)
+    pdf_n = stats.norm.pdf(r_pts, loc=mu_val, scale=sigma_val)
 
     chart_df = pd.DataFrame({
-        "Return": np.concatenate([x_pts, x_pts]),
+        "StockPrice": np.concatenate([price_pts, price_pts]),
         "Density": np.concatenate([pdf_t, pdf_n]),
-        "Model": ["Student's t (真實肥尾)" for _ in range(len(x_pts))] + ["Gaussian (常態分佈)" for _ in range(len(x_pts))]
+        "Model": ["Student's t (真實肥尾)" for _ in range(len(price_pts))] + ["Gaussian (常態分佈)" for _ in range(len(price_pts))]
     })
 
     base_density = alt.Chart(chart_df).mark_line().encode(
-        x=alt.X("Return:Q", title=f"{focus_sym} 日收益率 (1σ = ±{sigma_val*100:.2f}% / 每股 ±${sigma_1_dollar:.2f})", axis=alt.Axis(format="%")),
+        x=alt.X("StockPrice:Q", title=f"{focus_sym} 預期股價分佈區間 ($ USD)", axis=alt.Axis(format="$.1f")),
         y=alt.Y("Density:Q", title="機率密度"),
         color=alt.Color("Model:N", scale=alt.Scale(domain=["Student's t (真實肥尾)", "Gaussian (常態分佈)"], range=["#E02424", "#3F83F8"]))
     )
 
-    capm_rule_df = pd.DataFrame([{"x": capm_daily, "label": f"CAPM 基準: +{capm_daily:.2%} (+$ {cur_p*capm_daily:.2f})" }])
-    capm_line = alt.Chart(capm_rule_df).mark_rule(color="#10B981", strokeWidth=2, strokeDash=[5, 5]).encode(x="x:Q")
-    capm_text = alt.Chart(capm_rule_df).mark_text(align="left", dx=5, dy=-75, color="#10B981", fontWeight="bold", fontSize=11).encode(x="x:Q", text="label:N")
+    # 當前市價垂線 (藍色實線)
+    cur_p_df = pd.DataFrame([{"x": cur_p, "label": f"現價: ${cur_p:.2f}"}])
+    cur_p_line = alt.Chart(cur_p_df).mark_rule(color="#2563EB", strokeWidth=2).encode(x="x:Q")
+    cur_p_text = alt.Chart(cur_p_df).mark_text(align="center", dy=-95, color="#2563EB", fontWeight="bold", fontSize=11).encode(x="x:Q", text="label:N")
 
+    # +1σ 與 -1σ 股價垂線 (灰色虛線)
     vol_rule_df = pd.DataFrame([
-        {"x": -sigma_val, "label": f"-1σ: -{sigma_val*100:.2f}% (-${sigma_1_dollar:.2f})"},
-        {"x": sigma_val, "label": f"+1σ: +{sigma_val*100:.2f}% (+${sigma_1_dollar:.2f})"}
+        {"x": p_minus_1sigma, "label": f"-1σ: ${p_minus_1sigma:.2f}"},
+        {"x": p_plus_1sigma, "label": f"+1σ: ${p_plus_1sigma:.2f}"}
     ])
     vol_lines = alt.Chart(vol_rule_df).mark_rule(color="#64748B", strokeWidth=1.5, strokeDash=[3, 3]).encode(x="x:Q")
-    vol_text = alt.Chart(vol_rule_df).mark_text(align="center", dy=70, color="#64748B", fontSize=11, fontWeight="bold").encode(x="x:Q", text="label:N")
+    vol_text = alt.Chart(vol_rule_df).mark_text(align="center", dy=70, color="#64748B", fontSize=10.5, fontWeight="bold").encode(x="x:Q", text="label:N")
 
-    combined_chart = (base_density + capm_line + capm_text + vol_lines + vol_text).properties(height=260)
+    # CAPM 股價垂線 (綠色虛線)
+    capm_rule_df = pd.DataFrame([{"x": p_capm, "label": f"CAPM: ${p_capm:.2f}"}])
+    capm_line = alt.Chart(capm_rule_df).mark_rule(color="#10B981", strokeWidth=1.5, strokeDash=[5, 5]).encode(x="x:Q")
+    capm_text = alt.Chart(capm_rule_df).mark_text(align="left", dx=5, dy=-75, color="#10B981", fontWeight="bold", fontSize=10.5).encode(x="x:Q", text="label:N")
+
+    combined_chart = (base_density + cur_p_line + cur_p_text + vol_lines + vol_text + capm_line + capm_text).properties(height=260)
     st.altair_chart(combined_chart, use_container_width=True)
 
 # ------------------------------------------------------------------------------
-# Tab 2: 全市場 GTS Top 10 選股池
+# Tab 2: 全市場 GTS Top 10 選股池 (加入 Phase 週期與指標)
 # ------------------------------------------------------------------------------
 with tab_radar_top10:
-    st.subheader("🏆 全市場 GTS 評分 Top 10 候選池 (供換馬與新倉挑選)")
+    st.subheader("🏆 全市場 GTS 評分 Top 10 候選池 (帶 Phase 週期與進攻狀態)")
     st.caption("依據 P1 卓越 DNA (35分) + P2 非對稱預期差 (35分) + P3 即時破局催化劑 (30分) 綜合排序")
 
     all_universe = []
     for s, d in DEFAULT_RADAR_PRESETS.items():
+        # 計算候選標的之 Phase 狀態
+        # Phase 1: 低位潛伏 (未達 VWAP 或 PEG 極低，等待催化點火)
+        # Phase 2: 動量主升 (站穩 VWAP，GTS >= 84，機構放量加速)
+        # Phase 3: 目標收斂 (接近第一目標價，或短期估值充分計入)
+        if d["price"] >= d["target"] * 0.97:
+            cand_phase = "Phase 3 (🎯 目標收斂/考慮獲利)"
+        elif d["gts"] >= 84:
+            cand_phase = "Phase 2 (🚀 動量突破主升浪)"
+        else:
+            cand_phase = "Phase 1 (🛡️ 底部蓄勢潛伏期)"
+
         all_universe.append({
             "標的 (Ticker)": s,
             "GTS 總分": d["gts"],
+            "生命週期 Phase": cand_phase,
             "參考現價": f"${d['price']:.2f}",
             "今日漲跌": f"{d['pct']:+.2f}%",
             "評級": "🔥 Strong Buy" if d["gts"] >= 80 else "👀 Watchlist",
@@ -483,13 +553,71 @@ with tab_radar_top10:
     df_top10.index = df_top10.index + 1
     st.dataframe(df_top10, use_container_width=True)
 
+    st.info(
+        "💡 **Phase 週期在選股中的應用**：\n"
+        "- **Phase 2 標的 (如 AVGO, NVDA, ALNY)**：處於動量主升浪，GTS >= 85，適合開盤後順勢重倉推進。\n"
+        "- **Phase 1 標的 (如 ORCL, VOO, KLAC)**：適合回踩到 20D VWAP 時分批階梯吸籌。\n"
+        "- **Phase 3 標的 (如 MSFT)**：已收斂至第一目標價，嚴禁追高，應等待其回調或尋求階梯鎖利。"
+    )
+
 # ------------------------------------------------------------------------------
-# Tab 3: 重大事件日曆
+# Tab 3: 重大事件真月曆視圖 (True Month Calendar View)
 # ------------------------------------------------------------------------------
 with tab_calendar:
-    st.subheader("🗓️ 重大財報與產品發布日程")
+    st.subheader("🗓️ 重大財報與產品發布真月曆 (True Calendar View)")
     st.caption("自動對齊持倉與 GTS 龍頭之官方財報公布日與開發者大會日程")
 
+    # 選擇檢視的月份
+    col_yr, col_mo = st.columns([1, 1])
+    with col_yr:
+        sel_year = st.selectbox("年份", [2026, 2027], index=0)
+    with col_mo:
+        sel_month = st.selectbox("月份", list(range(1, 13)), index=10) # 預設 11 月 (財報高峰)
+
+    # 篩選當月事件
+    month_events = {}
+    for ev in STATIC_EVENTS_DB:
+        try:
+            ev_date = datetime.datetime.strptime(ev["start"], "%Y-%m-%d").date()
+            if ev_date.year == sel_year and ev_date.month == sel_month:
+                day_num = ev_date.day
+                if day_num not in month_events:
+                    month_events[day_num] = []
+                month_events[day_num].append(ev)
+        except Exception:
+            pass
+
+    # 繪製真月曆網格
+    cal_obj = calendar.monthcalendar(sel_year, sel_month)
+    days_headers = ["週一 (Mon)", "週二 (Tue)", "週三 (Wed)", "週四 (Thu)", "週五 (Fri)", "週六 (Sat)", "週日 (Sun)"]
+    
+    html_cal = '<div class="cal-grid">'
+    for h in days_headers:
+        html_cal += f'<div class="cal-header">{h}</div>'
+
+    for week in cal_obj:
+        for day in week:
+            if day == 0:
+                html_cal += '<div class="cal-cell" style="background:#F8FAFC; border:1px dashed #E2E8F0;"></div>'
+            else:
+                badges_html = ""
+                if day in month_events:
+                    for item in month_events[day]:
+                        badge_cls = "cal-badge-earnings" if item["category"] == "EARNINGS" else "cal-badge-keynote"
+                        badges_html += f'<span class="cal-badge {badge_cls}">{item["title"]}</span>'
+                
+                html_cal += f"""
+                <div class="cal-cell">
+                    <div class="cal-date-num">{day}</div>
+                    {badges_html}
+                </div>
+                """
+    html_cal += '</div>'
+    st.markdown(html_cal, unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.subheader("📋 結構化日程大表 (備查)")
+    
     today = datetime.date.today()
     matched = []
     for ev in STATIC_EVENTS_DB:
@@ -499,19 +627,17 @@ with tab_calendar:
             c_ev = dict(ev)
             c_ev["days"] = days
             matched.append(c_ev)
-
     matched.sort(key=lambda x: x["start"])
 
-    if matched:
-        grid_data = []
-        for item in matched:
-            status_tag = "🔴 48H 搶跑窗口" if item["days"] <= 2 else ("🟡 15天催化期" if item["days"] <= 15 else "🟢 常規排期")
-            grid_data.append({
-                "狀態警示": status_tag,
-                "預計日期": item["start"],
-                "倒數天數": f"{item['days']} 天",
-                "標的": item["symbol"],
-                "事件類別": item["category"],
-                "事件標題": item["title"]
-            })
-        st.dataframe(pd.DataFrame(grid_data), hide_index=True, use_container_width=True)
+    grid_data = []
+    for item in matched:
+        status_tag = "🔴 48H 搶跑窗口" if item["days"] <= 2 else ("🟡 15天催化期" if item["days"] <= 15 else "🟢 常規排期")
+        grid_data.append({
+            "狀態警示": status_tag,
+            "預計日期": item["start"],
+            "倒數天數": f"{item['days']} 天",
+            "標的": item["symbol"],
+            "事件類別": item["category"],
+            "事件標題": item["title"]
+        })
+    st.dataframe(pd.DataFrame(grid_data), hide_index=True, use_container_width=True)
