@@ -10,10 +10,10 @@ import streamlit as st
 import yfinance as yf
 
 # ==============================================================================
-# 0. 全局配置
+# 0. 全局配置 & 注入自適應現代化 CSS (徹底修復截斷與難看排版)
 # ==============================================================================
 st.set_page_config(
-    page_title="AI Investment Hub | Daily Action & Portfolio Command",
+    page_title="AI Investment Hub | 實盤決策指揮終端",
     page_icon="🏛️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -21,8 +21,55 @@ st.set_page_config(
 
 HKT_TZ = pytz.timezone("Asia/Hong_Kong")
 
+st.markdown("""
+<style>
+    /* 全局緊湊與高對比字體 */
+    .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
+    
+    /* 置頂核心資產卡片 (無截斷) */
+    .kpi-card-box {
+        background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+        border: 1px solid #334155;
+        border-radius: 10px;
+        padding: 14px 18px;
+        color: #F8FAFC;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    }
+    .kpi-label { font-size: 12px; color: #94A3B8; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
+    .kpi-value { font-size: 24px; font-weight: 800; color: #FFFFFF; line-height: 1.2; }
+    .kpi-sub { font-size: 11px; margin-top: 4px; font-weight: 500; }
+    .kpi-green { color: #10B981; }
+    .kpi-blue { color: #38BDF8; }
+
+    /* 總體評估方塊 */
+    .audit-summary-box {
+        background-color: #F8FAFC;
+        border-left: 5px solid #2563EB;
+        border-radius: 0 8px 8px 0;
+        padding: 14px 18px;
+        margin: 12px 0 18px 0;
+        color: #1E293B;
+        font-size: 14px;
+        line-height: 1.6;
+    }
+
+    /* 每日操作指令卡片 */
+    .action-row {
+        background: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin-bottom: 10px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    .action-trim { border-left: 5px solid #10B981; }
+    .action-raise { border-left: 5px solid #3B82F6; }
+    .action-hold { border-left: 5px solid #F59E0B; }
+</style>
+""", unsafe_allow_html=True)
+
 # ==============================================================================
-# 1. 內建高可靠度基準數據與全市場美股候選庫 (GTS Top 10 選股池)
+# 1. 內建高可靠度基準數據
 # ==============================================================================
 DEFAULT_RADAR_PRESETS = {
     "MSFT": {"price": 530.01, "pct": 1.05, "vwap": 521.80, "gts": 84, "nu": 4.10, "mu": 0.0012, "sigma": 0.0145, "cvar": -3.10, "stop": 508.00, "target": 530.00},
@@ -32,7 +79,6 @@ DEFAULT_RADAR_PRESETS = {
     "VOO": {"price": 703.23, "pct": 0.67, "vwap": 698.00, "gts": 81, "nu": 4.90, "mu": 0.0006, "sigma": 0.0085, "cvar": -2.10, "stop": 682.00, "target": 725.00},
     "GOOGL": {"price": 319.88, "pct": -0.10, "vwap": 318.20, "gts": 78, "nu": 4.30, "mu": 0.0008, "sigma": 0.0152, "cvar": -3.20, "stop": 308.00, "target": 355.00},
     "MRVL": {"price": 234.07, "pct": 2.43, "vwap": 228.60, "gts": 76, "nu": 3.60, "mu": 0.0022, "sigma": 0.0285, "cvar": -4.80, "stop": 225.00, "target": 255.00},
-    # 候選池擴展標的
     "ALNY": {"price": 268.00, "pct": 1.40, "vwap": 264.00, "gts": 85, "nu": 3.50, "mu": 0.0025, "sigma": 0.0230, "cvar": -4.10, "stop": 254.00, "target": 305.00},
     "KLAC": {"price": 765.20, "pct": 2.10, "vwap": 750.00, "gts": 83, "nu": 3.75, "mu": 0.0020, "sigma": 0.0220, "cvar": -3.90, "stop": 725.00, "target": 850.00},
     "AMD": {"price": 156.40, "pct": 1.95, "vwap": 152.00, "gts": 82, "nu": 3.30, "mu": 0.0022, "sigma": 0.0280, "cvar": -4.70, "stop": 148.00, "target": 175.00},
@@ -45,8 +91,7 @@ INITIAL_PORTFOLIO_CONFIG = (
     "VOO: 16.6687 @ 630.00\n"
     "ORCL: 13.0000 @ 115.00\n"
     "GOOGL: 0.5089 @ 290.00\n"
-    "MRVL: 0.8480 @ 220.00\n"
-    "NVDA: 0.0000 @ 0.00"
+    "MRVL: 0.8480 @ 220.00"
 )
 
 STATIC_EVENTS_DB = [
@@ -60,7 +105,7 @@ STATIC_EVENTS_DB = [
 ]
 
 # ==============================================================================
-# 2. 安全單線程實時數據獲取 (帶有本地保底，杜絕 Hang)
+# 2. 安全單線程市場數據獲取
 # ==============================================================================
 @st.cache_data(ttl=120, show_spinner=False)
 def get_safe_market_data(ticker_list: tuple):
@@ -103,11 +148,11 @@ def get_safe_market_data(ticker_list: tuple):
     return data_map
 
 # ==============================================================================
-# 3. 側邊欄控制台：持倉成本設定與 WhatsApp
+# 3. 側邊欄控制台
 # ==============================================================================
 with st.sidebar:
     st.title("💼 持倉與通訊設定")
-    st.caption("AI Investment Hub · Real-time Manager")
+    st.caption("AI Investment Hub · Terminal Config")
     st.markdown("---")
 
     st.subheader("📝 買入價與持股設定")
@@ -170,22 +215,31 @@ for sym, h in holdings_dict.items():
     if price >= m["target"]:
         phase_label = "Phase 3 (🎯 觸及目標收斂)"
         action_type = "TAKE_PROFIT_TRIM"
-        action_summary = f"**{sym}**：最新價 `${price:.2f}` 已達第一目標價 `${m['target']:.2f}` (浮盈 {pnl_pct:+.1f}%)。**建議今日手動掛單減持 20%~30% (約 1.0~1.6 股)** 落袋為安，並將剩餘部位防守線抬升至 `${price*0.98:.2f}`。"
+        action_title = f"🎯 減持鎖利：{sym} 觸及第一目標價 ${m['target']:.2f}"
+        action_desc = f"最新現價 **${price:.2f}** 累計利潤達 **+{pnl_pct:.1f}% (+${pnl_usd:.2f} USD)**。建議手動掛單減持 **20%~30% (約 1.0~1.6 股)** 鎖死利潤，並將剩餘持倉防守線調升至 **${price*0.98:.2f}**。"
     elif pnl_pct >= 10.0:
         phase_label = "Phase 2 (🚀 利潤奔跑保護)"
         action_type = "RAISE_TRAILING_STOP"
-        action_summary = f"**{sym}**：浮盈達 **{pnl_pct:+.2f}%**，進入主升浪。**建議強制抬升防守線至保本點以上 (${max(cost*1.05, price*0.96):.2f})**，未達目標價 `${m['target']:.2f}` 前堅定續抱。"
+        action_title = f"🚀 抬升防線：{sym} 浮盈達 +{pnl_pct:.2f}%"
+        action_desc = f"累計利潤 **+${pnl_usd:.2f} USD**，進入主升浪。強制將防守線由原先的 ${m['stop']:.2f} 抬升至 **保本點以上 (${max(cost*1.05, price*0.96):.2f})**，未達目標價前堅定續抱。"
     elif qty > 0:
         phase_label = "Phase 1 (🛡️ 基準防守初期)"
         action_type = "HOLD_AND_DEFEND"
-        action_summary = f"**{sym}**：持倉處於建倉區 (浮盈 {pnl_pct:+.2f}%)。**嚴守剛性防守線 `${m['stop']:.2f}`** (防守裕度 +{((price - m['stop'])/price*100):.2f}%)，守穩續抱，跌破一票否決清倉。"
+        action_title = f"🛡️ 嚴守防線：{sym} 浮盈 +{pnl_pct:.2f}%"
+        action_desc = f"處於初期建倉區。嚴格守穩剛性防守線 **${m['stop']:.2f}** (當前裕度 +{((price - m['stop'])/price*100):.2f}%)，守穩續抱，盤中跌破執行一票否決清倉。"
     else:
         phase_label = "現金觀察"
         action_type = "NONE"
-        action_summary = ""
+        action_title = ""
+        action_desc = ""
 
-    if action_summary:
-        actions_list.append({"symbol": sym, "type": action_type, "summary": action_summary})
+    if action_title:
+        actions_list.append({
+            "symbol": sym,
+            "type": action_type,
+            "title": action_title,
+            "desc": action_desc
+        })
 
     portfolio_items.append({
         "symbol": sym,
@@ -211,49 +265,65 @@ total_pnl_pct = (total_pnl_usd / total_cost_val * 100.0) if total_cost_val > 0 e
 now_str = datetime.datetime.now(HKT_TZ).strftime("%Y-%m-%d %H:%M:%S HKT")
 
 # ==============================================================================
-# 5. 【置頂核心區塊 1】：9人委員會整體評估 (Overall Comment)
+# 5. 【置頂區塊 1】：全投資組合總體評估 (無截斷卡片)
 # ==============================================================================
-st.markdown("## 🏛️ 9人決策委員會：全投資組合總體評估 (Overall Portfolio Audit)")
-st.caption(f"盤中審計時點: {now_str} | 治理最高準則: RULE-MD-01 (非對稱防禦) & RULE-MD-05 (月化+10% 複利基準)")
+st.title("🏛️ 9人決策委員會：實盤操作指揮終端")
+st.caption(f"審計時點: {now_str} | 治理鐵律: RULE-MD-01 (非對稱防禦) & RULE-MD-05 (月化+10% 複利基準)")
 
-# 置頂 KPI 總覽
-ov_c1, ov_c2, ov_c3, ov_c4 = st.columns(4)
-ov_c1.metric("總資產淨值 (NAV)", f"${total_market_val:,.2f} USD", delta="實盤持倉合計")
-ov_c2.metric("累積未實現損益 (P&L)", f"{'+' if total_pnl_usd>=0 else ''}${total_pnl_usd:,.2f} USD", delta=f"{total_pnl_pct:+.2f}% 總回報")
-ov_c3.metric("組合風控體制 (Regime)", "Goldilocks 擴張期", delta="宏觀順風 · 允許進攻")
-ov_c4.metric("CRO 全局防守線", "-8.0% 回撤預算底線", delta="無穿透風險 · 安全")
+# 使用高可讀性 HTML 卡片，保證在任何螢幕寬度都不截斷數字
+st.markdown(f"""
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px;">
+    <div class="kpi-card-box">
+        <div class="kpi-label">總資產淨值 (NAV)</div>
+        <div class="kpi-value">${total_market_val:,.2f}</div>
+        <div class="kpi-sub kpi-blue">實盤持倉合計 (USD)</div>
+    </div>
+    <div class="kpi-card-box">
+        <div class="kpi-label">累積未實現利潤 (P&L)</div>
+        <div class="kpi-value kpi-green">{'+' if total_pnl_usd>=0 else ''}${total_pnl_usd:,.2f}</div>
+        <div class="kpi-sub kpi-green">整體回報率: {total_pnl_pct:+.2f}%</div>
+    </div>
+    <div class="kpi-card-box">
+        <div class="kpi-label">組合風控體制</div>
+        <div class="kpi-value">Goldilocks 擴張</div>
+        <div class="kpi-sub kpi-green">宏觀順風 · 允許 Model B 進攻</div>
+    </div>
+    <div class="kpi-card-box">
+        <div class="kpi-label">CRO 全局防守底線</div>
+        <div class="kpi-value">-8.0% 回撤預算</div>
+        <div class="kpi-sub kpi-blue">無任何部位穿透 · 安全受控</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-# 總體評判文字 (Overall Comment)
-overall_comment_text = (
-    f"**【委員會主席 (MD) 總體裁決】**：\n"
-    f"- **組合健康度**：目前實盤持倉總 NAV 達 **${total_market_val:,.2f} USD**，整體浮盈 **{total_pnl_pct:+.2f}% (+${total_pnl_usd:,.2f} USD)**，"
-    f"資產運作大幅領先大盤基準，嚴格對標月化 +10% 複利治理路徑。\n"
-    f"- **進攻與防守配比**：核心領頭羊 (AVGO, MSFT) 全面進入主升浪與目標收斂期；大盤底倉 (VOO) 提供穩固流動性安全墊；"
-    f"半導體高貝塔標的 (MRVL) 脫離下行險境。目前全體持倉均位於 20-Day VWAP 之上，無任何部位跌破移動止損線。\n"
-    f"- **今日主戰術方向**：今日重點在於**「執行利潤收斂兌現，並將獲利部位防守線大幅向上抬升」**，鎖死近 30% 超額收益，拒絕坐雲霄飛車！"
-)
-st.info(overall_comment_text)
+# 總結評判文字 (修復原先的字串黏著問題)
+st.markdown(f"""
+<div class="audit-summary-box">
+    <b>【委員會主席 (MD) 總體裁決】</b><br>
+    • <b>組合健康度</b>：目前實盤持倉總 NAV 達 <b>${total_market_val:,.2f} USD</b>，累積浮盈 <b>{total_pnl_pct:+.2f}% (+${total_pnl_usd:,.2f} USD)</b>，大幅領先大盤基準，嚴格對標月化 +10% 複利治理目標。<br>
+    • <b>結構與體質</b>：核心領頭羊 (AVGO, MSFT) 全面進入主升浪與目標收斂期；大盤底倉 (VOO) 提供厚實安全墊；MRVL 脫離危險期。所有持倉均站穩 20-Day VWAP 之上。<br>
+    • <b>今日戰術核心</b>：今日核心戰術在於<b>「執行利潤收斂兌現，並將獲利部位防守線大幅向上抬升」</b>，鎖死超額收益，拒絕利潤坐雲霄飛車！
+</div>
+""", unsafe_allow_html=True)
 
 # ==============================================================================
-# 6. 【置頂核心區塊 2】：精算師今日具體操作建議 (Daily Action Directives)
+# 6. 【置頂區塊 2】：精算師每日具體操作指令 (清晰卡片版)
 # ==============================================================================
 st.markdown("### ⚡ 精算師每日具體操作建議 (Immediate Action Directives)")
 
-col_act_box, col_act_wa = st.columns([2.5, 1])
-
-with col_act_box:
-    for idx, act in enumerate(actions_list, 1):
-        if act["type"] == "TAKE_PROFIT_TRIM":
-            st.success(f"🎯 **動作 {idx}【獲利減持 / 鎖定勝局】**：\n{act['summary']}")
-        elif act["type"] == "RAISE_TRAILING_STOP":
-            st.info(f"🚀 **動作 {idx}【利潤奔跑 / 防線抬升】**：\n{act['summary']}")
-        else:
-            st.warning(f"🛡️ **動作 {idx}【持倉防守 / 守穩續抱】**：\n{act['summary']}")
-
-with col_act_wa:
-    st.markdown("**📲 一鍵推播今日操作清單**")
-    st.write("將置頂的 Overall Comment 與今日具體操作指令打包推送至 WhatsApp。")
+for act in actions_list:
+    border_class = "action-trim" if act["type"] == "TAKE_PROFIT_TRIM" else ("action-raise" if act["type"] == "RAISE_TRAILING_STOP" else "action-hold")
+    badge_color = "#10B981" if act["type"] == "TAKE_PROFIT_TRIM" else ("#3B82F6" if act["type"] == "RAISE_TRAILING_STOP" else "#F59E0B")
     
+    st.markdown(f"""
+    <div class="action-row {border_class}">
+        <div style="font-size: 15px; font-weight: 700; color: {badge_color}; margin-bottom: 4px;">{act['title']}</div>
+        <div style="font-size: 13.5px; color: #334155; line-height: 1.5;">{act['desc']}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# WhatsApp 推播獨立區塊 (杜絕按鈕截斷)
+with st.expander("📲 一鍵將上述操作指令推播至 WhatsApp (點擊展開/發送)"):
     wa_summary_lines = [
         f"🏛️【AI Hub 每日操作指令與總體評估】",
         f"時間: {now_str}",
@@ -261,38 +331,37 @@ with col_act_wa:
         "🎯【今日重點執行項目】:"
     ]
     for idx, act in enumerate(actions_list, 1):
-        wa_summary_lines.append(f"{idx}. {act['summary'].replace('**', '')}")
-
+        wa_summary_lines.append(f"{idx}. {act['title']}\n   {act['desc'].replace('**', '')}")
     full_wa_payload = "\n".join(wa_summary_lines)
 
-    if st.button("📤 推播今日操作指令至 WhatsApp", type="primary", use_container_width=True):
+    if st.button("🚀 確認發送每日操作清單至 WhatsApp", type="primary"):
         if not wa_phone or not wa_apikey:
-            st.error("請先於側邊欄輸入手機號碼與 CallMeBot API Key！")
+            st.error("請先於左側邊欄輸入手機號碼與 CallMeBot API Key！")
         else:
             enc = urllib.parse.quote(full_wa_payload)
             endpoint = f"https://api.callmebot.com/whatsapp.php?phone={wa_phone}&text={enc}&apikey={wa_apikey}"
             try:
                 res = requests.get(endpoint, timeout=8)
                 if res.status_code == 200:
-                    st.success("✅ 今日操作清單已成功發送至 WhatsApp！")
+                    st.success("✅ 操作指令已成功發送至你的 WhatsApp！")
                 else:
-                    st.error("❌ 發送失敗，請確認 API Key 與號碼。")
+                    st.error("❌ 發送失敗，請確認 API Key 與手機號碼格式。")
             except Exception as e:
                 st.error(f"❌ 連線異常: {e}")
 
 st.markdown("---")
 
 # ==============================================================================
-# 7. 次級詳細分析模組 (分頁導航)
+# 7. 主分頁架構
 # ==============================================================================
 tab_pos, tab_radar_top10, tab_calendar = st.tabs([
-    "💼 持倉動態雷達與 CAPM 深度分析",
+    "💼 持倉動態雷達與 CAPM 直觀金額圖表",
     "🏆 全市場 GTS Top 10 選股池 (下次挑選)",
     "📅 重大事件日曆"
 ])
 
 # ------------------------------------------------------------------------------
-# Tab 1: 持倉動態雷達與 CAPM 深度分析
+# Tab 1: 持倉動態雷達與直觀金額圖表
 # ------------------------------------------------------------------------------
 with tab_pos:
     st.subheader("📊 核心持倉損益與 Phase 週期矩陣")
@@ -318,22 +387,41 @@ with tab_pos:
 
     st.dataframe(pd.DataFrame(pos_table), hide_index=True, use_container_width=True)
 
+    # --------------------------------------------------------------------------
+    # 個股深度檢視：金額化直觀分佈圖 (徹底解答「+2.38% 是多少錢？」)
+    # --------------------------------------------------------------------------
     st.markdown("---")
     focus_symbols = [p["symbol"] for p in portfolio_items if p["qty"] > 0]
-    focus_sym = st.selectbox("選擇要審核的持倉標的 (檢視條件分佈與 CAPM)", focus_symbols)
+    focus_sym = st.selectbox("選擇要審核的持倉標的 (檢視條件分佈與直觀金額換算)", focus_symbols)
     focus = next((item for item in portfolio_items if item["symbol"] == focus_sym), portfolio_items[0])
 
     fc1, fc2, fc3, fc4 = st.columns(4)
     fc1.metric("個股累計利潤", f"{focus['pnl_pct']:+.2f}%", delta=f"${focus['pnl_usd']:+,.2f} USD")
     fc2.metric("GTS 評分", f"{focus['gts']} / 100", delta=focus["phase"])
     fc3.metric("極值自由度 ν", f"{focus['nu']:.2f}", delta="肥尾下行" if focus['nu'] < 4.5 else "常態尾部", delta_color="inverse")
-    fc4.metric("95% CVaR", f"{focus['cvar']:.2f}%", delta="單日極端下行敞口", delta_color="inverse")
+    fc4.metric("95% CVaR", f"{focus['cvar']:.2f}%", delta="單日下行敞口", delta_color="inverse")
 
-    # 動態收益率分佈圖與 CAPM 疊加 (每檔股票專屬 mu 與 sigma)
+    # 核心參數
+    cur_p = focus["price"]
+    pos_qty = focus["qty"]
+    pos_val = focus["val"]
     mu_val = focus["mu"]
     sigma_val = focus["sigma"]
     nu_val = focus["nu"]
 
+    # 換算每 1σ 的具體每股金額與部位損益金額
+    sigma_1_dollar = cur_p * sigma_val
+    sigma_1_pos_pnl = pos_val * sigma_val
+
+    st.markdown(f"""
+    <div style="background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 13.5px; color: #1E3A8A;">
+        💡 <b>波動度直接換算金額 (以 {focus_sym} 持有 {pos_qty:.4f} 股 / 市值 ${pos_val:,.2f} USD 換算)：</b><br>
+        • <b>正常 1σ 日波動 (±{sigma_val*100:.2f}%)</b>：等於每股股價波動 <b>±${sigma_1_dollar:.2f} USD</b>，部位單日損益波動約 <b>±${sigma_1_pos_pnl:,.2f} USD</b>。<br>
+        • <b>極端 95% CVaR 尾部風險 ({focus['cvar']:.2f}%)</b>：若遭遇單日黑天鵝，預估每股下跌 <b>-${cur_p * abs(focus['cvar']/100):.2f} USD</b>，部位單日潛在最大虧損約 <b>-${pos_val * abs(focus['cvar']/100):,.2f} USD</b>。
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 繪製 Altair 直觀金額雙標註分佈圖
     rf_daily = 0.042 / 252.0
     beta_val = 1.15 if focus_sym not in ["VOO"] else 1.00
     capm_daily = rf_daily + beta_val * (0.10/252.0 - rf_daily)
@@ -351,27 +439,27 @@ with tab_pos:
     })
 
     base_density = alt.Chart(chart_df).mark_line().encode(
-        x=alt.X("Return:Q", title=f"{focus_sym} 條件日收益率區間 (μ={mu_val:.3%}, σ={sigma_val:.3%})", axis=alt.Axis(format="%")),
+        x=alt.X("Return:Q", title=f"{focus_sym} 日收益率 (1σ = ±{sigma_val*100:.2f}% / 每股 ±${sigma_1_dollar:.2f})", axis=alt.Axis(format="%")),
         y=alt.Y("Density:Q", title="機率密度"),
         color=alt.Color("Model:N", scale=alt.Scale(domain=["Student's t (真實肥尾)", "Gaussian (常態分佈)"], range=["#E02424", "#3F83F8"]))
     )
 
-    capm_rule_df = pd.DataFrame([{"x": capm_daily, "label": f"CAPM 基準 ({capm_daily:.2%})"}])
+    capm_rule_df = pd.DataFrame([{"x": capm_daily, "label": f"CAPM 基準: +{capm_daily:.2%} (+$ {cur_p*capm_daily:.2f})" }])
     capm_line = alt.Chart(capm_rule_df).mark_rule(color="#10B981", strokeWidth=2, strokeDash=[5, 5]).encode(x="x:Q")
-    capm_text = alt.Chart(capm_rule_df).mark_text(align="left", dx=5, dy=-80, color="#10B981", fontWeight="bold", fontSize=11).encode(x="x:Q", text="label:N")
+    capm_text = alt.Chart(capm_rule_df).mark_text(align="left", dx=5, dy=-75, color="#10B981", fontWeight="bold", fontSize=11).encode(x="x:Q", text="label:N")
 
     vol_rule_df = pd.DataFrame([
-        {"x": mu_val - sigma_val, "label": f"-1σ ({mu_val - sigma_val:.2%})"},
-        {"x": mu_val + sigma_val, "label": f"+1σ ({mu_val + sigma_val:.2%})"}
+        {"x": -sigma_val, "label": f"-1σ: -{sigma_val*100:.2f}% (-${sigma_1_dollar:.2f})"},
+        {"x": sigma_val, "label": f"+1σ: +{sigma_val*100:.2f}% (+${sigma_1_dollar:.2f})"}
     ])
-    vol_lines = alt.Chart(vol_rule_df).mark_rule(color="#6B7280", strokeWidth=1.5, strokeDash=[3, 3]).encode(x="x:Q")
-    vol_text = alt.Chart(vol_rule_df).mark_text(align="center", dy=70, color="#6B7280", fontSize=10).encode(x="x:Q", text="label:N")
+    vol_lines = alt.Chart(vol_rule_df).mark_rule(color="#64748B", strokeWidth=1.5, strokeDash=[3, 3]).encode(x="x:Q")
+    vol_text = alt.Chart(vol_rule_df).mark_text(align="center", dy=70, color="#64748B", fontSize=11, fontWeight="bold").encode(x="x:Q", text="label:N")
 
-    combined_chart = (base_density + capm_line + capm_text + vol_lines + vol_text).properties(height=240)
+    combined_chart = (base_density + capm_line + capm_text + vol_lines + vol_text).properties(height=260)
     st.altair_chart(combined_chart, use_container_width=True)
 
 # ------------------------------------------------------------------------------
-# Tab 2: 全市場 GTS Top 10 選股池 (下次挑選)
+# Tab 2: 全市場 GTS Top 10 選股池
 # ------------------------------------------------------------------------------
 with tab_radar_top10:
     st.subheader("🏆 全市場 GTS 評分 Top 10 候選池 (供換馬與新倉挑選)")
@@ -394,11 +482,6 @@ with tab_radar_top10:
     df_top10 = pd.DataFrame(all_universe).sort_values(by="GTS 總分", ascending=False).reset_index(drop=True)
     df_top10.index = df_top10.index + 1
     st.dataframe(df_top10, use_container_width=True)
-
-    st.info(
-        "💡 **選股決策規則**：當現有持倉（如 MSFT）觸及目標價執行減倉並釋放流動性現金後，"
-        "優先由上方排名前三（GTS >= 85 分）且處於 PEAD 催化期的標的（如 AVGO, NVDA, ALNY）進行階梯換馬。"
-    )
 
 # ------------------------------------------------------------------------------
 # Tab 3: 重大事件日曆
@@ -432,11 +515,3 @@ with tab_calendar:
                 "事件標題": item["title"]
             })
         st.dataframe(pd.DataFrame(grid_data), hide_index=True, use_container_width=True)
-
-        st.markdown("---")
-        st.subheader("⏳ 近期重大事件倒數與風控指引")
-        for item in matched:
-            tag = "🔴 48H 機構搶跑窗口" if item["days"] <= 2 else ("🟡 近期即將公布" if item["days"] <= 15 else "🟢 遠期常規")
-            with st.expander(f"{tag} | {item['start']} · {item['title']} (倒數 {item['days']} 天)", expanded=(item["days"] <= 15)):
-                st.write(f"**標的**：`{item['symbol']}` | **類別**：`{item['category']}`")
-                st.write(f"**事件說明與指引**：\n{item['desc']}")
